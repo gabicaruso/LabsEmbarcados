@@ -11,8 +11,7 @@
 /************************************************************************/
 /* prototypes                                                           */
 /************************************************************************/
-void but1_callback(void);
-
+//void but1_callback(void);
 
 /************************************************************************/
 /* LCD + TOUCH                                                          */
@@ -54,6 +53,7 @@ typedef struct {
 	uint32_t x;         // posicao x
 	uint32_t y;         // posicao y
 	uint8_t status;
+	void (*callback)(t_but);
 } t_but;
 
 QueueHandle_t xQueueTouch;
@@ -243,6 +243,21 @@ void mxt_handler(struct mxt_device *device, uint *x, uint *y)
   } while ((mxt_is_message_pending(device)) & (i < MAX_ENTRIES));
 }
 
+void but0_callback(t_but *but) {
+	but->status = !but->status;
+	draw_button_new(*but);
+}
+
+void but1_callback(t_but *but) {
+	but->status = !but->status;
+	draw_button_new(*but);
+}
+
+void but2_callback(t_but *but) {
+	but->status = !but->status;
+	draw_button_new(*but);
+}
+
 /************************************************************************/
 /* tasks                                                                */
 /************************************************************************/
@@ -306,17 +321,17 @@ void task_lcd(void){
 
 	t_but but0 = {.width = 120, .height = 75, .border = 2,
 		.colorOn = COLOR_TOMATO, .colorOff = COLOR_BLACK,
-	.x = ILI9488_LCD_WIDTH/2, .y = 40, .status = 0 };
+	.x = ILI9488_LCD_WIDTH/2, .y = 40, .status = 0, .callback = &but0_callback };
 	draw_button_new(but0);
 	
 	t_but but1 = {.width = 120, .height = 75, .border = 2,
 		.colorOn = COLOR_YELLOWGREEN, .colorOff = COLOR_BLACK,
-	.x = ILI9488_LCD_WIDTH/2, .y = 140, .status = 0 };
+	.x = ILI9488_LCD_WIDTH/2, .y = 140, .status = 0, .callback = &but1_callback};
 	draw_button_new(but1);
 	
 	t_but but2 = {.width = 120, .height = 75, .border = 2,
 		.colorOn = COLOR_TURQUOISE, .colorOff = COLOR_BLACK,
-	.x = ILI9488_LCD_WIDTH/2, .y = 240, .status = 0 };
+	.x = ILI9488_LCD_WIDTH/2, .y = 240, .status = 0, .callback = &but2_callback };
 	draw_button_new(but2);
 	
 	 t_but botoes[] = {but0, but1, but2};
@@ -335,8 +350,9 @@ void task_lcd(void){
 			//draw_button_new(but2);
 			int b = process_touch(botoes, touch, 3);
 			if (b >= 0) {
-				botoes[b].status = !botoes[b].status;
-				draw_button_new(botoes[b]);
+				botoes[b].callback(&botoes[b]);
+				//botoes[b].status = !botoes[b].status;
+				//draw_button_new(botoes[b]);
 			}
 			printf("x:%d y:%d\n", touch.x, touch.y);
 		}
