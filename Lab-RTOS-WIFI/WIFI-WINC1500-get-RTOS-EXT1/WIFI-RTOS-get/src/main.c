@@ -41,6 +41,16 @@ static char server_host_name[] = MAIN_SERVER_NAME;
 /* RTOS                                                                 */
 /************************************************************************/
 
+#define LED_PIO_ID		ID_PIOC
+#define LED_PIO		PIOC
+#define LED_PIN		8
+#define LED_IDX_MASK	(1 << LED_PIN)
+
+#define BUT_PIO			PIOA
+#define BUT_PIO_ID		ID_PIOA
+#define BUT_IDX			11
+#define BUT_IDX_MASK	(1 << BUT_IDX)
+
 #define TASK_WIFI_STACK_SIZE      (6*4096/sizeof(portSTACK_TYPE))
 #define TASK_WIFI_PRIORITY        (1)
 #define TASK_PROCESS_STACK_SIZE   (4*4096/sizeof(portSTACK_TYPE))
@@ -51,11 +61,14 @@ QueueHandle_t xQueueMsg;
 
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask,
 signed char *pcTaskName);
+int process_str(char buffer[]);
+void LED_handler(int status);
+void but_callback(void);
 extern void vApplicationIdleHook(void);
 extern void vApplicationTickHook(void);
 extern void vApplicationMallocFailedHook(void);
 extern void xPortSysTickHandler(void);
-
+volatile char but_flag = 0;
 TaskHandle_t xHandleWifi = NULL;
 
 /************************************************************************/
@@ -83,7 +96,10 @@ extern void vApplicationMallocFailedHook(void){
 /************************************************************************/
 /* callbacks                                                            */
 /************************************************************************/
-
+void but_callback(void){
+	but_flag = !but_flag;
+	LED_handler(but_flag);
+}
 /**
 * \brief Callback function of IP address.
 *
@@ -220,12 +236,44 @@ static void wifi_cb(uint8_t u8MsgType, void *pvMsg)
 /************************************************************************/
 /* TASKS                                                                */
 /************************************************************************/
+void LED_handler(int status){
+	if (status == 1){
+		but_flag = 1;
+		pio_clear(LED_PIO, LED_IDX_MASK);
+	} else{
+		but_flag = 0;
+		pio_set(LED_PIO, LED_IDX_MASK);
+	}
+}
+
+int process_str(char buffer[]){
+	char status;
+	for (int i = 0; i < 150; i++){
+		if ((!strcmp(buffer[i],'l'))&&(!strcmp(buffer[i+1],'e'))&&(!strcmp(buffer[i+2],'d'))){
+			if(!strcmp(buffer[i+7], '0')){
+				return 0;
+			} 
+			if (!strcmp(buffer[i+7], '1')){
+				return 1;
+			}
+			else{
+				return 18;
+			}
+		}
+	}
+}
+
+void format(char buffer[], char param[]){
+	sprintf(buffer, "GET %s HTTP/1.1\r\n Accept: */*\r\n\r\n", param);
+	send(tcp_client_socket, g_sendBuffer, strlen((char *)g_sendBuffer), 0);
+	printf("O buffer é %s \n",buffer);
+}
 
 static void task_process(void *pvParameters) {
 
   printf("task process created \n");
   vTaskDelay(1000);
-
+  int status;
   uint msg_counter = 0;
   tstrSocketRecvMsg *p_recvMsg;
 
@@ -254,8 +302,7 @@ static void task_process(void *pvParameters) {
 
       case GET:
       printf("STATE: GET \n");
-      sprintf((char *)g_sendBuffer, MAIN_PREFIX_BUFFER);
-      send(tcp_client_socket, g_sendBuffer, strlen((char *)g_sendBuffer), 0);
+      format(g_sendBuffer, "/status");
       state = ACK;
       break;
 
@@ -282,8 +329,12 @@ static void task_process(void *pvParameters) {
 
       if(xQueueReceive(xQueueMsg, &p_recvMsg, 5000) == pdTRUE){
         printf(STRING_LINE);
+		//mensagem
         printf(p_recvMsg->pu8Buffer);
-        printf(STRING_EOL);  printf(STRING_LINE);
+		status = process_str(p_recvMsg->pu8Buffer);
+		LED_handler(status);
+        printf(STRING_EOL);  
+		printf(STRING_LINE);
         state = DONE;
       }
       else {
@@ -382,6 +433,17 @@ int main(void)
   /* Initialize the UART console. */
   configure_console();
   printf(STRING_HEADER);
+  pmc_enable_periph_clk(LED_PIO_ID);
+  pio_set_output(LED_PIO, LED_IDX_MASK, 0, 0, 0);
+   pmc_enable_periph_clk(BUT_PIO_ID);
+   NVIC_EnableIRQ(BUT_PIO_ID);
+   NVIC_SetPriority(BUT_PIO_ID, 4); // Prioridade 4
+   pio_configure(BUT_PIO, PIO_INPUT, BUT_IDX_MASK, PIO_PULLUP | PIO_DEBOUNCE);
+
+   pio_handler_set(BUT_PIO,BUT_PIO_ID,BUT_IDX_MASK,PIO_IT_FALL_EDGE, but_callback);
+
+   pio_enable_interrupt(BUT_PIO, BUT_IDX_MASK);
+
 
   xTaskCreate(task_wifi, "Wifi", TASK_WIFI_STACK_SIZE, NULL, TASK_WIFI_PRIORITY, &xHandleWifi);
   xTaskCreate(task_process, "process", TASK_PROCESS_STACK_SIZE, NULL, TASK_PROCESS_PRIORITY,  NULL );
